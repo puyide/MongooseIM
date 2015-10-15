@@ -19,6 +19,7 @@
 
 -include_lib("escalus/include/escalus.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -include_lib("exml/include/exml.hrl").
 
@@ -127,7 +128,8 @@ init_per_testcase(check_unregistered, Config) ->
     Config;
 init_per_testcase(not_allowed_registration_cancelation, Config) ->
     ok = dynamic_modules:stop(<<"localhost">>, mod_register),
-    escalus:init_per_testcase(not_allowed_registration_cancelation, Config);
+    escalus:init_per_testcase(not_allowed_registration_cancelation, Config),
+    escalus:create_users(Config, {by_name, [alice]});
 init_per_testcase(message_zlib_limit, Config) ->
     Listeners = [Listener
                  || {Listener, _, _} <- escalus_ejabberd:rpc(ejabberd_config, get_local_option, [listen])],
@@ -148,6 +150,7 @@ end_per_testcase(message_zlib_limit, Config) ->
 end_per_testcase(check_unregistered, Config) ->
     Config;
 end_per_testcase(not_allowed_registration_cancelation, Config) ->
+    escalus_users:delete_users(Config, {by_name, [alice]}),
     ok = dynamic_modules:start(<<"localhost">>, mod_register, []),
     escalus:end_per_testcase(not_allowed_registration_cancelation, Config);
 end_per_testcase(CaseName, Config) ->
@@ -199,12 +202,13 @@ bad_request_registration_cancelation(Config) ->
 
     escalus:story(Config, [{alice, 1}], fun(Alice) ->
 
-        %% Alice sends cancelation request
+        %% Alice sends bad cancelation request
         escalus:send(Alice, bad_cancelation_stanza()),
 
         %% Alice receives failure response
-        escalus:assert(is_iq_error,
-                       escalus:wait_for_stanza(Alice))
+        Stanza = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, Stanza),
+        ?assertNotMatch(undefined, exml_query:path(Stanza, [{element, <<"error">>}, {element, <<"bad-request">>}]))
 
     end).
 
@@ -214,20 +218,17 @@ not_allowed_registration_cancelation(Config) ->
     %% cases): "No sender is allowed to cancel registrations in-band."
     %% Presumably when registration itself is not enabled.
 
-    escalus:create_users(Config, {by_name, [alice]}),
-
     escalus:story(Config, [{alice, 1}], fun(Alice) ->
 
         %% Alice sends cancelation request
         escalus:send(Alice, escalus_stanza:remove_account()),
 
         %% Alice receives failure response
-        escalus:assert(is_iq_error,
-                       escalus:wait_for_stanza(Alice))
+        Stanza = escalus:wait_for_stanza(Alice),
+        escalus:assert(is_iq_error, Stanza),
+        ?assertNotMatch(undefined, exml_query:path(Stanza, [{element, <<"error">>}, {element, <<"not-allowed">>}]))
 
-    end),
-
-    escalus_users:delete_users(Config, {by_name, [alice]}).
+    end).
 
 registration_timeout(Config) ->
     [Alice, Bob] = escalus_users:get_users({by_name, [alice, bob]}),
